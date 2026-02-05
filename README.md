@@ -20,6 +20,7 @@ These scripts restore the missing metadata by:
 ## Prerequisites
 
 - **[ExifTool](https://exiftool.org/)** - Must be installed and available in your PATH
+- **[Python 3.x](https://www.python.org/)** - Required for Google's spatial-media tool (video metadata)
 - **Windows 10/11** - Scripts use Windows batch/PowerShell
 - **GoPro Player** - For exporting 360° photos and videos
 - **Adobe Premiere Pro + Media Encoder** *(optional)* - For advanced video editing workflow

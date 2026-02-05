@@ -3,8 +3,8 @@ setlocal EnableDelayedExpansion
 
 :: ============================================================================
 :: GoPro MAX 360 Metadata Injector
-:: Copies GPS/time metadata from .360 files and forces GSpherical tags for
-:: Google Photos 360 recognition. Successfully tagged files are moved to Output.
+:: Copies GPS/time metadata from .360 files and injects proper spherical video
+:: metadata using Google's spatial-media tool for Google Photos recognition.
 :: ============================================================================
 
 :: Load configuration
@@ -15,6 +15,7 @@ set "RENDER_DIR=%RENDER_DIR%"
 set "SRC360_DIR=%SOURCE_360_DIR%"
 set "OUTPUT_DIR=%OUTPUT_DIR%"
 set "PLAYER_DIR=%WATCH_FOLDER_DIR%\Source"
+set "SPATIALMEDIA=%~dp0spatialmedia"
 
 :: Override with arguments if provided
 if not "%~1"=="" set "RENDER_DIR=%~1"
@@ -74,75 +75,76 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
         <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - SKIP: No matching .360"
         echo.
     ) else (
-        set "TEMP_OUT=!TEMP!\!MP4_FILE!"
+        set "TEMP_FILE=!TEMP!\!MP4_FILE!"
+        set "TEMP_OUT=!TEMP!\!MP4_NAME!_360.mp4"
         
-        :: Clean up any existing temp file
+        :: Clean up any existing temp files
+        if exist "!TEMP_FILE!" del /f "!TEMP_FILE!" >nul 2>&1
         if exist "!TEMP_OUT!" del /f "!TEMP_OUT!" >nul 2>&1
         
         :: Copy to temp
         <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Copying..."
-        copy /y "!MP4_PATH!" "!TEMP_OUT!" >nul 2>&1
+        copy /y "!MP4_PATH!" "!TEMP_FILE!" >nul 2>&1
         
-        if not exist "!TEMP_OUT!" (
+        if not exist "!TEMP_FILE!" (
             set /a ERRORS+=1
             <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - ERROR: Copy failed"
             echo.
         ) else (
-            :: Copy GPS and time metadata from .360 source FIRST (Adding Make/Model/Exposure)
-            <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Copying GPS/Time/Cam details..."
-            exiftool -overwrite_original -TagsFromFile "!SRC360_PATH!" "-GPS*" "-CreateDate" "-ModifyDate" "-TrackCreateDate" "-TrackModifyDate" "-MediaCreateDate" "-MediaModifyDate" "-Make" "-Model" "-ExposureTime" "-FNumber" "-ISO" "-ExposureProgram" "-ExposureMode" "-WhiteBalance" "-FocalLength" "!TEMP_OUT!" >nul 2>&1
+            :: Step 1: Inject spherical metadata using Google's spatial-media tool FIRST
+            :: (This creates a new file, so we do this before adding other metadata)
+            <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Injecting 360 metadata..."
+            python "!SPATIALMEDIA!" -i "!TEMP_FILE!" "!TEMP_OUT!" >nul 2>&1
             
-            :: Inject spherical metadata LAST (after GPS/time to avoid XMP corruption)
-            :: Note: XMP-GSpherical tags don't persist in MP4 via ExifTool, using XMP tags instead
-            <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Injecting 360 tags..."
-            exiftool -overwrite_original -XMP:ProjectionType=equirectangular -XMP-GPano:UsePanoramaViewer=True -XMP-GPano:ProjectionType=equirectangular "!TEMP_OUT!" >nul 2>&1
-            
-            if errorlevel 1 (
+            if not exist "!TEMP_OUT!" (
                 set /a ERRORS+=1
-                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - ERROR: Inject failed"
+                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - ERROR: spatial-media failed"
                 echo.
-                del /f "!TEMP_OUT!" >nul 2>&1
+                del /f "!TEMP_FILE!" >nul 2>&1
             ) else (
+                :: Step 2: Copy GPS and time metadata from .360 source to the OUTPUT file
+                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Adding GPS/Time metadata..."
+                exiftool -overwrite_original -TagsFromFile "!SRC360_PATH!" "-GPS*" "-CreateDate" "-ModifyDate" "-TrackCreateDate" "-TrackModifyDate" "-MediaCreateDate" "-MediaModifyDate" "!TEMP_OUT!" >nul 2>&1
                 
-                :: Verify 360 tag (check XMP:ProjectionType since XMP-GSpherical doesn't persist in MP4)
+                :: Step 3: Set Make and Model (GoPro MAX videos only have "MAX2" in source)
+                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Setting camera info..."
+                exiftool -overwrite_original -Make="GoPro" -Model="GoPro MAX" "!TEMP_OUT!" >nul 2>&1
+                
+                :: Verify spherical metadata was injected
                 <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Verifying..."
-                set "PROJECTION_VAL="
-                for /f "tokens=*" %%V in ('exiftool -s3 -XMP:ProjectionType "!TEMP_OUT!" 2^>nul') do set "PROJECTION_VAL=%%V"
+                set "SPHERICAL_CHECK="
+                for /f "tokens=*" %%V in ('python "!SPATIALMEDIA!" "!TEMP_OUT!" 2^>nul ^| findstr /i "Spherical"') do set "SPHERICAL_CHECK=%%V"
                 
-                if /i "!PROJECTION_VAL!"=="equirectangular" (
-                    :: Replace original and move to Output
-                    move /y "!TEMP_OUT!" "!MP4_PATH!" >nul 2>&1
+                if defined SPHERICAL_CHECK (
+                    :: Move to output folder
+                    move /y "!TEMP_OUT!" "!OUTPUT_DIR!\!MP4_FILE!" >nul 2>&1
                     if errorlevel 1 (
                         set /a ERRORS+=1
-                        <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - ERROR: Replace failed"
+                        <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - ERROR: Move failed"
                         echo.
-                        del /f "!TEMP_OUT!" >nul 2>&1
                     ) else (
-                        move /y "!MP4_PATH!" "!OUTPUT_DIR!\!MP4_FILE!" >nul 2>&1
-                        if errorlevel 1 (
-                            set /a ERRORS+=1
-                            <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - ERROR: Move failed"
-                            echo.
-                        ) else (
-                            set /a SUCCESS+=1
-                            <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - OK"
-                            echo.
-                            
-                            :: Delete processed file from GoPro Player folder (checking .mov extension)
-                            if exist "!PLAYER_DIR!\!MP4_NAME!.mov" (
-                                del "!PLAYER_DIR!\!MP4_NAME!.mov" >nul 2>&1
-                                if not exist "!PLAYER_DIR!\!MP4_NAME!.mov" (
-                                   echo       - Deleted .mov from GoPro Player folder
-                                )
-                            )
+                        set /a SUCCESS+=1
+                        <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - OK"
+                        echo.
+                        
+                        :: Delete original from Render folder
+                        del "!MP4_PATH!" >nul 2>&1
+                        
+                        :: Delete processed file from GoPro Player folder (checking .mov extension)
+                        if exist "!PLAYER_DIR!\!MP4_NAME!.mov" (
+                            del "!PLAYER_DIR!\!MP4_NAME!.mov" >nul 2>&1
                         )
                     )
                 ) else (
                     set /a NOT360+=1
-                    <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - WARNING: Tag not verified"
+                    <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - WARNING: 360 metadata not verified"
                     echo.
-                    move /y "!TEMP_OUT!" "!MP4_PATH!" >nul 2>&1
+                    :: Still move to output, may work
+                    move /y "!TEMP_OUT!" "!OUTPUT_DIR!\!MP4_FILE!" >nul 2>&1
                 )
+                
+                :: Clean up temp file
+                del /f "!TEMP_FILE!" >nul 2>&1
             )
         )
     )
@@ -155,11 +157,11 @@ echo ===========================================================================
 echo   SUMMARY
 echo ============================================================================
 echo.
-echo   Total MP4s:       !TOTAL!
+echo   Total MP4s:          !TOTAL!
 echo   Successfully tagged: !SUCCESS!
-echo   Errors:           !ERRORS!
-echo   Missing .360:     !MISSING!
-echo   Not tagged 360:   !NOT360!
+echo   Errors:              !ERRORS!
+echo   Missing .360:        !MISSING!
+echo   Verification failed: !NOT360!
 echo.
 echo   Output folder: %OUTPUT_DIR%
 echo.
