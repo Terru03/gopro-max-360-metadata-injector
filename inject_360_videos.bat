@@ -106,9 +106,27 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
                 <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Adding GPS/Time metadata..."
                 exiftool -overwrite_original -TagsFromFile "!SRC360_PATH!" "-GPS*" "-CreateDate" "-ModifyDate" "-TrackCreateDate" "-TrackModifyDate" "-MediaCreateDate" "-MediaModifyDate" "!TEMP_OUT!" >nul 2>&1
                 
-                :: Step 3: Set Make and Model (GoPro MAX videos only have "MAX2" in source)
+                :: Step 3: Extract ISO and shutter speed range from GoPro telemetry
+                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Extracting exposure data..."
+                set "EXPOSURE_DATA="
+                for /f "tokens=*" %%E in ('powershell -ExecutionPolicy Bypass -File "%~dp0extract_exposure_range.ps1" "!SRC360_PATH!" 2^>nul') do set "EXPOSURE_DATA=%%E"
+                
+                :: Parse ISO and Shutter from pipe-separated output (format: "ISO_RANGE|SHUTTER_RANGE")
+                set "ISO_RANGE="
+                set "SHUTTER_RANGE="
+                for /f "tokens=1,2 delims=|" %%A in ("!EXPOSURE_DATA!") do (
+                    set "ISO_RANGE=%%A"
+                    set "SHUTTER_RANGE=%%B"
+                )
+                
+                :: Step 4: Set Make, Model, and exposure info
                 <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Setting camera info..."
-                exiftool -overwrite_original -Make="GoPro" -Model="GoPro MAX2" "!TEMP_OUT!" >nul 2>&1
+                if defined ISO_RANGE (
+                    set "EXPOSURE_INFO=ISO !ISO_RANGE!, Shutter !SHUTTER_RANGE!"
+                    exiftool -overwrite_original -Make="GoPro" -Model="GoPro MAX2" "-UserComment=!EXPOSURE_INFO!" "-Description=!EXPOSURE_INFO!" "!TEMP_OUT!" >nul 2>&1
+                ) else (
+                    exiftool -overwrite_original -Make="GoPro" -Model="GoPro MAX2" "!TEMP_OUT!" >nul 2>&1
+                )
                 
                 :: Verify spherical metadata was injected
                 <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Verifying..."
