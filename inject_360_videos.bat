@@ -108,7 +108,7 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
                 
                 :: Step 3: Set Make and Model (GoPro MAX videos only have "MAX2" in source)
                 <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Setting camera info..."
-                exiftool -overwrite_original -Make="GoPro" -Model="GoPro MAX" "!TEMP_OUT!" >nul 2>&1
+                exiftool -overwrite_original -Make="GoPro" -Model="GoPro MAX2" "!TEMP_OUT!" >nul 2>&1
                 
                 :: Verify spherical metadata was injected
                 <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Verifying..."
