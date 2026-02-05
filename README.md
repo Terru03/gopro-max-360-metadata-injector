@@ -120,7 +120,16 @@ For more control over editing, you can use Adobe Premiere Pro with the watch fol
 - **Input:** MP4 files in `2 - Render/`
 - **Matches with:** `.360` files in `1 - .360 files/`
 - **Output:** `3 - Output/`
-- **Injects:** XMP-GSpherical tags (`Spherical=true`, `Stitched=true`, `ProjectionType=equirectangular`)
+- **Injects:**
+  - Spherical video metadata via Google's spatial-media tool (`Spherical=true`, `ProjectionType=equirectangular`)
+  - Camera info: `Make=GoPro`, `Model=GoPro MAX2`
+  - GPS coordinates and timestamps from original .360 file
+  - **Exposure range** extracted from GoPro telemetry (e.g., `ISO 449-806, Shutter 1/30 - 1/120`)
+
+> **Note:** The exposure range is stored in the video's Description/UserComment fields. While this data is embedded in the file and readable by tools like ExifTool or VLC, Google Photos does not display Description fields for videos.
+
+### `extract_exposure_range.ps1`
+Helper script that parses GoPro's per-frame telemetry data to extract min/max ISO and shutter speed values.
 
 ### `config.bat`
 Central configuration file for all folder paths. Edit this to customize for your setup.
