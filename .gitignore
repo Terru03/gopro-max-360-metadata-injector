@@ -1,0 +1,38 @@
+# GoPro media files
+*.360
+*.36P
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.jpg
+*.JPG
+*.jpeg
+*.JPEG
+*.png
+*.PNG
+
+# Media folders (keep the folders via .gitkeep but ignore contents)
+1 - .360 files/*
+!1 - .360 files/.gitkeep
+2 - Render/*
+!2 - Render/.gitkeep
+3 - Output/*
+!3 - Output/.gitkeep
+4 - GoPro Player Exports/*
+!4 - GoPro Player Exports/.gitkeep
+5 - Premiere Watch Folder/*
+!5 - Premiere Watch Folder/.gitkeep
+12 - Trips/
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# macOS
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+*_original
