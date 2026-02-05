@@ -93,8 +93,9 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
             exiftool -overwrite_original -TagsFromFile "!SRC360_PATH!" "-GPS*" "-CreateDate" "-ModifyDate" "-TrackCreateDate" "-TrackModifyDate" "-MediaCreateDate" "-MediaModifyDate" "-Make" "-Model" "-ExposureTime" "-FNumber" "-ISO" "-ExposureProgram" "-ExposureMode" "-WhiteBalance" "-FocalLength" "!TEMP_OUT!" >nul 2>&1
             
             :: Inject spherical metadata LAST (after GPS/time to avoid XMP corruption)
+            :: Note: XMP-GSpherical tags don't persist in MP4 via ExifTool, using XMP tags instead
             <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Injecting 360 tags..."
-            exiftool -overwrite_original -XMP-GSpherical:Spherical=true -XMP-GSpherical:Stitched=true -XMP-GSpherical:ProjectionType=equirectangular -XMP-GSpherical:StereoMode=mono -XMP-GPano:UsePanoramaViewer=True "!TEMP_OUT!" >nul 2>&1
+            exiftool -overwrite_original -XMP:ProjectionType=equirectangular -XMP-GPano:UsePanoramaViewer=True -XMP-GPano:ProjectionType=equirectangular "!TEMP_OUT!" >nul 2>&1
             
             if errorlevel 1 (
                 set /a ERRORS+=1
@@ -103,12 +104,12 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
                 del /f "!TEMP_OUT!" >nul 2>&1
             ) else (
                 
-                :: Verify spherical tag
+                :: Verify 360 tag (check XMP:ProjectionType since XMP-GSpherical doesn't persist in MP4)
                 <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Verifying..."
-                set "SPHERICAL_VAL="
-                for /f "tokens=*" %%V in ('exiftool -s3 -XMP-GSpherical:Spherical "!TEMP_OUT!" 2^>nul') do set "SPHERICAL_VAL=%%V"
+                set "PROJECTION_VAL="
+                for /f "tokens=*" %%V in ('exiftool -s3 -XMP:ProjectionType "!TEMP_OUT!" 2^>nul') do set "PROJECTION_VAL=%%V"
                 
-                if /i "!SPHERICAL_VAL!"=="True" (
+                if /i "!PROJECTION_VAL!"=="equirectangular" (
                     :: Replace original and move to Output
                     move /y "!TEMP_OUT!" "!MP4_PATH!" >nul 2>&1
                     if errorlevel 1 (

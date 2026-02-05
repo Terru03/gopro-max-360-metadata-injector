@@ -6,8 +6,8 @@
 :: All paths should be absolute paths without trailing backslashes.
 :: ============================================================================
 
-:: Base directory (change this to your project folder)
-set "BASE_DIR=P:\GoPro MAX 2"
+:: Base directory (parent of "6 - GitHub" folder where these scripts live)
+set "BASE_DIR=%~dp0.."
 
 :: Source folder for original .360 and .36P files
 set "SOURCE_360_DIR=%BASE_DIR%\1 - .360 files"
