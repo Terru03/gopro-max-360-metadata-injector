@@ -23,7 +23,7 @@ if not "%~2"=="" set "SRC360_DIR=%~2"
 if not "%~3"=="" set "OUTPUT_DIR=%~3"
 
 :: Get ANSI escape character
-for /F %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
+for /F %%a in ('echo prompt $E ^| cmd 2^>nul') do set "ESC=%%a"
 
 :: Counters
 set /a PROCESSED=0
