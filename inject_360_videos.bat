@@ -102,9 +102,29 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
                 echo.
                 del /f "!TEMP_FILE!" >nul 2>&1
             ) else (
-                :: Step 2: Copy GPS and time metadata from .360 source to the OUTPUT file
-                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Adding GPS/Time metadata..."
                 exiftool -overwrite_original -TagsFromFile "!SRC360_PATH!" "-GPS*" "-CreateDate" "-ModifyDate" "-TrackCreateDate" "-TrackModifyDate" "-MediaCreateDate" "-MediaModifyDate" "!TEMP_OUT!" >nul 2>&1
+                
+                :: Step 2.5: Recover GPS if not found in static tags (common with Quick Capture)
+                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Checking for delayed GPS lock..."
+                set "HAS_GPS="
+                for /f "tokens=*" %%G in ('exiftool -GPSLatitude -n "!TEMP_OUT!" 2^>nul') do set "HAS_GPS=%%G"
+                
+                :: If GPS is missing or 0, try to extract from telemetry
+                set "TRY_TELEMETRY=0"
+                if not defined HAS_GPS set "TRY_TELEMETRY=1"
+                echo !HAS_GPS! | findstr /C:": 0" >nul && set "TRY_TELEMETRY=1"
+                
+                if "!TRY_TELEMETRY!"=="1" (
+                    <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Recovering GPS from telemetry..."
+                    set "RECOVERED_GPS="
+                    for /f "tokens=1,2 delims=," %%A in ('powershell -ExecutionPolicy Bypass -Command "$gps = exiftool -ee3 -n -p '$GPSLatitude,$GPSLongitude' '!SRC360_PATH!' 2>$null | ForEach-Object { $p = $_.Split(','); if ($p[0] -ne '0' -and $p[1] -ne '0') { $_; break } } | Select-Object -First 1; if ($gps) { $gps } else { '' }"') do (
+                        set "LAT=%%A"
+                        set "LON=%%B"
+                        if not "!LAT!"=="" (
+                            exiftool -overwrite_original -GPSLatitude="!LAT!" -GPSLongitude="!LON!" -GPSLatitudeRef="!LAT!" -GPSLongitudeRef="!LON!" "!TEMP_OUT!" >nul 2>&1
+                        )
+                    )
+                )
                 
                 :: Step 3: Extract ISO and shutter speed range from GoPro telemetry
                 <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Extracting exposure data..."

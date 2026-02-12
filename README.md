@@ -124,6 +124,7 @@ For more control over editing, you can use Adobe Premiere Pro with the watch fol
   - Spherical video metadata via Google's spatial-media tool (`Spherical=true`, `ProjectionType=equirectangular`)
   - Camera info: `Make=GoPro`, `Model=GoPro MAX2`
   - GPS coordinates and timestamps from original .360 file
+  - **GPS Recovery:** Automatically extracts the first valid GPS lock from the telemetry stream if the recording started before a signal was acquired (common with Quick Capture).
   - **Exposure range** extracted from GoPro telemetry (e.g., `ISO 449-806, Shutter 1/30 - 1/120`)
 
 > **Note:** The exposure range is stored in the video's Description/UserComment fields. While this data is embedded in the file and readable by tools like ExifTool or VLC, Google Photos does not display Description fields for videos.
@@ -154,6 +155,7 @@ After processing, the scripts automatically:
 | "No matching .360 file" | Ensure filenames match between export and original |
 | Photo not showing as 360° | Check that the source was a 360° photo (not a reframed export) |
 | Video not showing as 360° | Try re-uploading; some platforms take time to process 360° |
+| "System cannot find the drive specified" | Spurious warning from CMD redirection; if the script says "OK", the file was processed correctly |
 
 ---
 
