@@ -17,7 +17,7 @@ Write-Host "Press Ctrl+C to stop."
 Write-Host ""
 
 while ($true) {
-    $files = Get-ChildItem -Path $SourceDir -File
+    $files = Get-ChildItem -Path $SourceDir -File | Where-Object { $_.Extension -ne ".jpg" }
 
     foreach ($file in $files) {
         $sourcePath = $file.FullName
