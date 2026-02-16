@@ -67,6 +67,11 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
     set "MP4_FILE=%%~nxF"
     set "SRC360_PATH=!SRC360_DIR!\!MP4_NAME!.360"
     
+    :: Logic Fix: Reset GPS variables to prevent leakage from previous files
+    set "LAT="
+    set "LON="
+    set "ALT="
+    
     :: Progress line (updateable)
     <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] Processing: !MP4_FILE!"
     
@@ -114,14 +119,35 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
                 if not defined HAS_GPS set "TRY_TELEMETRY=1"
                 echo !HAS_GPS! | findstr /C:": 0" >nul && set "TRY_TELEMETRY=1"
                 
+
+
+                :: If we ALREADY have GPS (from standard tags), copy it to Keys/UserData ensuring Google Photos sees it.
+                if "!TRY_TELEMETRY!"=="0" (
+                    <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Syncing standard GPS to Keys..."
+                    :: Use numerical values (#) to ensure compatibility with Keys:GPSCoordinates
+                    exiftool -overwrite_original "-Keys:GPSCoordinates<$XMP:GPSLatitude# $XMP:GPSLongitude# $XMP:GPSAltitude#" "-UserData:GPSCoordinates<$XMP:GPSLatitude# $XMP:GPSLongitude# $XMP:GPSAltitude#" "!TEMP_OUT!" >nul 2>&1
+                    
+                    :: Fallback if Altitude is missing
+                    if errorlevel 1 (
+                         exiftool -overwrite_original "-Keys:GPSCoordinates<$XMP:GPSLatitude# $XMP:GPSLongitude#" "-UserData:GPSCoordinates<$XMP:GPSLatitude# $XMP:GPSLongitude#" "!TEMP_OUT!" >nul 2>&1
+                    )
+                )
+
                 if "!TRY_TELEMETRY!"=="1" (
                     <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Recovering GPS from telemetry..."
                     set "RECOVERED_GPS="
-                    for /f "tokens=1,2 delims=," %%A in ('powershell -ExecutionPolicy Bypass -Command "$gps = exiftool -ee3 -n -p '$GPSLatitude,$GPSLongitude' '!SRC360_PATH!' 2>$null | ForEach-Object { $p = $_.Split(','); if ($p[0] -ne '0' -and $p[1] -ne '0') { $_; break } } | Select-Object -First 1; if ($gps) { $gps } else { '' }"') do (
+                    :: Extract Lat, Lon, Alt (default 0)
+                    for /f "tokens=1,2,3 delims=," %%A in ('powershell -ExecutionPolicy Bypass -Command "$gps = exiftool -ee3 -n -p '$GPSLatitude,$GPSLongitude,$GPSAltitude' '!SRC360_PATH!' 2>$null | ForEach-Object { $p = $_.Split(','); if ($p[0] -ne '0' -and $p[1] -ne '0') { $_; break } } | Select-Object -First 1; if ($gps) { $gps } else { '' }"') do (
                         set "LAT=%%A"
                         set "LON=%%B"
+                        set "ALT=%%C"
+                        if "!ALT!"=="" set "ALT=0"
                         if not "!LAT!"=="" (
-                            exiftool -overwrite_original -GPSLatitude="!LAT!" -GPSLongitude="!LON!" -GPSLatitudeRef="!LAT!" -GPSLongitudeRef="!LON!" "!TEMP_OUT!" >nul 2>&1
+                            :: Construct ISO6709 string for QuickTime/Keys (e.g., "+27.5916+086.5640+0000/") - actually Exiftool handles decimal input for these tags too usually, but Keys:GPSCoordinates prefers "lat lon alt" or generic.
+                            :: Exiftool's -Keys:GPSCoordinates accepts "Lat Lon Alt" directly.
+                            
+                            :: Inject into multiple standard tags for maximum compatibility (Keys for Android/Google, UserData for Apple)
+                            exiftool -overwrite_original -Keys:GPSCoordinates="!LAT! !LON! !ALT!" -UserData:GPSCoordinates="!LAT! !LON! !ALT!" -GPSLatitude="!LAT!" -GPSLongitude="!LON!" -GPSLatitudeRef="!LAT!" -GPSLongitudeRef="!LON!" -GPSAltitude="!ALT!" -GPSAltitudeRef="!ALT!" "!TEMP_OUT!" >nul 2>&1
                         )
                     )
                 )
@@ -165,12 +191,12 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
                         <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - OK"
                         echo.
                         
-                        :: Delete original from Render folder
+                        REM Delete original from Render folder
                         del "!MP4_PATH!" >nul 2>&1
                         
-                        :: Delete processed file from GoPro Player folder (checking .mov extension)
-                        if exist "!PLAYER_DIR!\!MP4_NAME!.mov" (
-                            del "!PLAYER_DIR!\!MP4_NAME!.mov" >nul 2>&1
+                        REM Delete processed files from Watch Folder Source (any extension)
+                        for %%D in ("!PLAYER_DIR!\!MP4_NAME!.*") do (
+                            del "%%D" >nul 2>&1
                         )
                     )
                 ) else (

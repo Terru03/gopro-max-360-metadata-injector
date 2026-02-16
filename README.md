@@ -124,7 +124,9 @@ For more control over editing, you can use Adobe Premiere Pro with the watch fol
   - Spherical video metadata via Google's spatial-media tool (`Spherical=true`, `ProjectionType=equirectangular`)
   - Camera info: `Make=GoPro`, `Model=GoPro MAX2`
   - GPS coordinates and timestamps from original .360 file
+  - **Google Photos Support:** Injects GPS data into `Keys:GPSCoordinates` and `UserData:GPSCoordinates` tags (required for video location on Google Photos), converting from standard XMP tags if necessary.
   - **GPS Recovery:** Automatically extracts the first valid GPS lock from the telemetry stream if the recording started before a signal was acquired (common with Quick Capture).
+  - **Reliability:** Clears GPS variables between files to prevent data leakage (fixing a bug where files without GPS inherited the previous file's location).
   - **Exposure range** extracted from GoPro telemetry (e.g., `ISO 449-806, Shutter 1/30 - 1/120`)
 
 > **Note:** The exposure range is stored in the video's Description/UserComment fields. While this data is embedded in the file and readable by tools like ExifTool or VLC, Google Photos does not display Description fields for videos.
@@ -144,6 +146,8 @@ After processing, the scripts automatically:
 2. ✅ Move verified files to the output folder
 3. ⚠️ Flag files that fail verification with a warning
 4. 📊 Display a summary with success/error counts
+5. 🗑️ Clean up intermediate files and the source files from the Premiere Watch Folder to save space
+
 
 ---
 
