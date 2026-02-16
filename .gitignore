@@ -36,3 +36,6 @@ desktop.ini
 *.tmp
 *.temp
 *_original
+*_dump.txt
+__pycache__/
+*.spec
