@@ -20,6 +20,7 @@ These scripts restore the missing metadata by:
 ## Prerequisites
 
 - **[ExifTool](https://exiftool.org/)** - Must be installed and available in your PATH
+- **[FFmpeg](https://ffmpeg.org/)** - Required for GPMF telemetry injection (must be in your PATH)
 - **[Python 3.x](https://www.python.org/)** - Required for Google's spatial-media tool (video metadata)
 - **Windows 10/11** - Scripts use Windows batch/PowerShell
 - **GoPro Player** - For exporting 360° photos and videos
@@ -127,6 +128,7 @@ For more control over editing, you can use Adobe Premiere Pro with the watch fol
   - **Google Photos Support:** Injects GPS data into `Keys:GPSCoordinates` and `UserData:GPSCoordinates` tags (required for video location on Google Photos), converting from standard XMP tags if necessary.
   - **GPS Recovery:** Automatically extracts the first valid GPS lock from the telemetry stream if the recording started before a signal was acquired (common with Quick Capture).
   - **Reliability:** Clears GPS variables between files to prevent data leakage (fixing a bug where files without GPS inherited the previous file's location).
+  - **GPMF Telemetry:** Injects the full GPMF sensor track (GPS, accelerometer, gyroscope, etc.) from the source `.360` file, enabling compatibility with telemetry-aware players and tools.
   - **Exposure range** extracted from GoPro telemetry (e.g., `ISO 449-806, Shutter 1/30 - 1/120`)
 
 > **Note:** The exposure range is stored in the video's Description/UserComment fields. While this data is embedded in the file and readable by tools like ExifTool or VLC, Google Photos does not display Description fields for videos.

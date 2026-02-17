@@ -96,7 +96,28 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
             <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - ERROR: Copy failed"
             echo.
         ) else (
-            :: Step 1: Inject spherical metadata using Google's spatial-media tool FIRST
+            :: Step 1: Inject GPMF Telemetry if ffmpeg is available (BEFORE spatial-media to avoid stripping metadata)
+            where ffmpeg >nul 2>&1
+            if !errorlevel! EQU 0 (
+                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Injecting GPMF telemetry..."
+                set "TEMP_GPMF=!TEMP!\!MP4_NAME!_gpmf.mp4"
+                if exist "!TEMP_GPMF!" del /f "!TEMP_GPMF!" >nul 2>&1
+                
+                :: Map video/audio from input (0) and GPMF (stream 3) from source (1)
+                :: -map 0: copy all streams from TEMP_FILE (video/audio)
+                :: -map 1:3 copy stream 3 from SRC360_PATH (GPMF)
+                :: Use TEMP_FILE as input, map to TEMP_GPMF
+                ffmpeg -y -v error -i "!TEMP_FILE!" -i "!SRC360_PATH!" -map 0 -map 1:3 -c copy -tag:d:1 gpmd "!TEMP_GPMF!" >nul 2>&1
+                
+                if exist "!TEMP_GPMF!" (
+                    move /y "!TEMP_GPMF!" "!TEMP_FILE!" >nul 2>&1
+                ) else (
+                    <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - WARNING: GPMF injection failed"
+                    echo.
+                )
+            )
+
+            :: Step 2: Inject spherical metadata using Google's spatial-media tool
             :: (This creates a new file, so we do this before adding other metadata)
             <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Injecting 360 metadata..."
             python "!SPATIALMEDIA!" -i "!TEMP_FILE!" "!TEMP_OUT!" >nul 2>&1
@@ -107,6 +128,11 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
                 echo.
                 del /f "!TEMP_FILE!" >nul 2>&1
             ) else (
+
+                
+
+                
+                :: Step 2: Inject Metadata (Dates, GPS) - Run AFTER ffmpeg to ensure metadata persistence
                 exiftool -overwrite_original -TagsFromFile "!SRC360_PATH!" "-GPS*" "-CreateDate" "-ModifyDate" "-TrackCreateDate" "-TrackModifyDate" "-MediaCreateDate" "-MediaModifyDate" "!TEMP_OUT!" >nul 2>&1
                 
                 :: Step 2.5: Recover GPS if not found in static tags (common with Quick Capture)
@@ -231,4 +257,4 @@ echo   Output folder: %OUTPUT_DIR%
 echo.
 echo ============================================================================
 
-pause
+REM pause
