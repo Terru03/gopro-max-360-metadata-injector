@@ -37,9 +37,11 @@ These scripts restore the missing metadata by:
 ├── 📁 3 - Output/                # ✅ Processed files ready for upload
 ├── 📁 4 - GoPro Player Exports/  # Exported JPG photos awaiting metadata injection
 ├── 📁 5 - Premiere Watch Folder/ # Adobe Media Encoder watch folder
+├── 📁 6 - Premiere Exports/      # Flat video edits from Premiere Pro
 ├── config.bat                    # Path configuration
 ├── inject_360_photos.bat         # Photo metadata injector
 ├── inject_360_videos.bat         # Video metadata injector
+├── inject_flat_videos.bat        # Flat video metadata injector (Premiere edits)
 ├── run_watch_folder.bat          # Watch folder automation
 └── safe_move.ps1                 # Safe file mover utility
 ```
@@ -109,6 +111,27 @@ For more control over editing, you can use Adobe Premiere Pro with the watch fol
 
 ---
 
+### 🎬 For Flat Video Edits (Premiere Pro Non-360 Export)
+
+When you edit a 360° video in Premiere Pro and export it as a standard flat video (e.g., reframed or cropped), all GoPro metadata is stripped. This script re-injects the telemetry and GPS data **without** the spherical/360° tags:
+
+| Step | Action | Details |
+|------|--------|---------|
+| 1 | **Edit in Premiere** | Import and edit your 360° footage in Premiere Pro |
+| 2 | **Export as flat video** | Export to `6 - Premiere Exports/` as a standard H.264 MP4 (keep the same base filename as the original `.360`) |
+| 3 | **Run the script** | Double-click `inject_flat_videos.bat` |
+| 4 | **Upload** | Find your processed videos in `3 - Output/` |
+
+**What the script does:**
+- Matches each export with its original `.360` file by filename
+- Injects GPMF telemetry track (GPS, accelerometer, gyroscope) via FFmpeg
+- Copies GPS coordinates and timestamps from the original
+- Recovers GPS from telemetry if initial lock was delayed
+- Sets camera make/model and exposure info
+- Does **not** inject spherical/360° metadata (since the video is flat)
+
+---
+
 ## Script Details
 
 ### `inject_360_photos.bat`
@@ -132,6 +155,27 @@ For more control over editing, you can use Adobe Premiere Pro with the watch fol
   - **Exposure range** extracted from GoPro telemetry (e.g., `ISO 449-806, Shutter 1/30 - 1/120`)
 
 > **Note:** The exposure range is stored in the video's Description/UserComment fields. While this data is embedded in the file and readable by tools like ExifTool or VLC, Google Photos does not display Description fields for videos.
+
+### `inject_flat_videos.bat`
+- **Input:** MP4 files in `6 - Premiere Exports/`
+- **Matches with:** `.360` files in `1 - .360 files/`
+- **Output:** `3 - Output/`
+- **Injects:**
+  - Camera info: `Make=GoPro`, `Model=GoPro MAX2`
+  - GPS coordinates and timestamps from original .360 file
+  - **Cross-Platform GPS:** Writes GPS to three tag locations for maximum compatibility:
+    - `Keys:GPSCoordinates` (ISO 6709) — Google Photos, Apple devices
+    - `UserData:GPSCoordinates` (`©xyz` atom) — Android phone galleries
+    - `XMP-exif` GPS tags — Windows Photos, web viewers
+  - **Google Photos Fix:** ISO 6709 coordinates are limited to 5 decimal digits, as Google Photos ignores coordinates with more than 5
+  - **Loci Cleanup:** Automatically removes the `loci` (3GPP LocationInformation) atom that exiftool creates as a side-effect, preventing conflicting low-precision GPS data
+  - **GPS Recovery:** Extracts the first 3D-locked GPS position from GPMF telemetry, skipping initial 0,0 samples before GPS lock (common with Quick Capture mode)
+  - **GPMF Telemetry:** Injects the full GPMF sensor track (GPS, accelerometer, gyroscope, etc.) from the source `.360` file
+  - **Exposure range** extracted from GoPro telemetry
+- **Does NOT inject:** Spherical/360° metadata (since the export is a standard flat video)
+
+### `extract_first_locked_gps.ps1`
+Helper script that scans GoPro GPMF telemetry for the first GPS sample with a 3D lock (`GPSMeasureMode=3`) and non-zero coordinates. Outputs two lines: decimal lat/lon/alt (for XMP tags) and ISO 6709 format with max 5 decimal digits (for `Keys`/`UserData` GPS tags). This handles GoPro's Quick Capture mode where the camera starts recording before GPS has acquired a fix.
 
 ### `extract_exposure_range.ps1`
 Helper script that parses GoPro's per-frame telemetry data to extract min/max ISO and shutter speed values.
