@@ -1,36 +1,52 @@
 @echo off
-setlocal EnableDelayedExpansion
+setlocal EnableExtensions EnableDelayedExpansion
 
 :: ============================================================================
 :: GoPro Flat Video Metadata Injector
-:: Re-injects GPS/telemetry/date metadata from original .360 source files
-:: into flat (non-360) Premiere Pro exports. Does NOT inject spherical/360
-:: metadata since the export is a standard flat video.
+:: Re-injects GPS/telemetry/date metadata from an original .360 source into a
+:: flat Premiere/Media Encoder MP4. GPMF is located dynamically and capped to
+:: the rendered video's own duration so source telemetry can never extend it.
 :: ============================================================================
 
-:: Load configuration
 call "%~dp0config.bat"
 
-:: Set directories from config (can be overridden with arguments)
 set "PREMIERE_DIR=%PREMIERE_EXPORT_DIR%"
 set "SRC360_DIR=%SOURCE_360_DIR%"
 set "OUTPUT_DIR=%OUTPUT_DIR%"
+set "VERIFY_SCRIPT=%~dp0verify_video_integrity.ps1"
 
-:: Override with arguments if provided
 if not "%~1"=="" set "PREMIERE_DIR=%~1"
 if not "%~2"=="" set "SRC360_DIR=%~2"
 if not "%~3"=="" set "OUTPUT_DIR=%~3"
 
-:: Get ANSI escape character
 for /F %%a in ('echo prompt $E ^| cmd 2^>nul') do set "ESC=%%a"
 
-:: Counters
 set /a PROCESSED=0
 set /a ERRORS=0
 set /a MISSING=0
 set /a SUCCESS=0
+set /a NO_GPMF=0
 
-:: Count total MP4 files
+where ffmpeg >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: ffmpeg is not available in PATH.
+    exit /b 1
+)
+where ffprobe >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: ffprobe is not available in PATH.
+    exit /b 1
+)
+where exiftool >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: exiftool is not available in PATH.
+    exit /b 1
+)
+if not exist "%VERIFY_SCRIPT%" (
+    echo ERROR: verify_video_integrity.ps1 is missing.
+    exit /b 1
+)
+
 set /a TOTAL=0
 for /f "delims=" %%F in ('dir /b /s "%PREMIERE_DIR%\*.mp4" 2^>nul') do set /a TOTAL+=1
 
@@ -47,17 +63,14 @@ echo.
 echo ============================================================================
 echo.
 
-:: Create output directory if it doesn't exist
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 
-:: Exit early if no files found
 if !TOTAL! EQU 0 (
     echo   No MP4 files found in Premiere exports folder.
     echo.
     goto :summary
 )
 
-:: Process each MP4 in Premiere exports folder
 for /f "delims=" %%F in ('dir /b /s "%PREMIERE_DIR%\*.mp4" 2^>nul') do (
     set /a PROCESSED+=1
     set "MP4_PATH=%%F"
@@ -65,12 +78,14 @@ for /f "delims=" %%F in ('dir /b /s "%PREMIERE_DIR%\*.mp4" 2^>nul') do (
     set "MP4_FILE=%%~nxF"
     set "SRC360_PATH=!SRC360_DIR!\!MP4_NAME!.360"
 
-    REM Reset GPS variables to prevent leakage from previous files
     set "LAT="
     set "LON="
     set "ALT="
+    set "GPMF_STREAM="
+    set "RENDER_DURATION="
+    set "PIPELINE_OK=1"
+    set "USED_GPMF=0"
 
-    REM Progress line
     <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] Processing: !MP4_FILE!"
 
     if not exist "!SRC360_PATH!" (
@@ -78,26 +93,26 @@ for /f "delims=" %%F in ('dir /b /s "%PREMIERE_DIR%\*.mp4" 2^>nul') do (
         <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - SKIP: No matching .360"
         echo.
     ) else (
-        set "TEMP_FILE=!TEMP!\!MP4_FILE!"
+        set "TEMP_FILE=!TEMP!\!MP4_NAME!_flat_working.mp4"
+        set "TEMP_GPMF=!TEMP!\!MP4_NAME!_flat_gpmf.mp4"
 
-        REM Clean up any existing temp files
-        if exist "!TEMP_FILE!" del /f "!TEMP_FILE!" >nul 2>&1
+        if exist "!TEMP_FILE!" del /f /q "!TEMP_FILE!" >nul 2>&1
+        if exist "!TEMP_GPMF!" del /f /q "!TEMP_GPMF!" >nul 2>&1
 
-        REM Copy to temp
-        <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Copying..."
         copy /y "!MP4_PATH!" "!TEMP_FILE!" >nul 2>&1
-
         if not exist "!TEMP_FILE!" (
+            set "PIPELINE_OK=0"
             set /a ERRORS+=1
-            <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - ERROR: Copy failed"
             echo.
-        ) else (
-            REM Step 1: Extract first GPS-locked position from GPMF telemetry BEFORE ffmpeg
-            <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Extracting first locked GPS from telemetry..."
+            echo   ERROR: Could not copy !MP4_FILE! to the temporary folder.
+        )
+
+        if "!PIPELINE_OK!"=="1" (
+            :: Extract the first GPS sample with a valid 3D lock.
             set "GPS_DATA="
             set "GPS_ISO6709="
             set "GPS_LINE=0"
-            for /f "tokens=*" %%G in ('powershell -ExecutionPolicy Bypass -File "%~dp0extract_first_locked_gps.ps1" "!SRC360_PATH!" 2^>nul') do (
+            for /f "tokens=*" %%G in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0extract_first_locked_gps.ps1" "!SRC360_PATH!" 2^>nul') do (
                 set /a GPS_LINE+=1
                 if !GPS_LINE! EQU 1 set "GPS_DATA=%%G"
                 if !GPS_LINE! EQU 2 set "GPS_ISO6709=%%G"
@@ -110,53 +125,52 @@ for /f "delims=" %%F in ('dir /b /s "%PREMIERE_DIR%\*.mp4" 2^>nul') do (
                     set "ALT=%%C"
                 )
                 if "!ALT!"=="" set "ALT=0"
-                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Locked GPS: !LAT!, !LON!, !ALT!m"
-            ) else (
-                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - WARNING: No locked GPS found"
-                echo.
             )
 
-            REM Step 2: Inject GPMF Telemetry via ffmpeg, include location metadata if GPS was found
-            where ffmpeg >nul 2>&1
-            if !errorlevel! EQU 0 (
-                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Injecting GPMF telemetry..."
-                set "TEMP_GPMF=!TEMP!\!MP4_NAME!_gpmf.mp4"
-                if exist "!TEMP_GPMF!" del /f "!TEMP_GPMF!" >nul 2>&1
+            for /f "delims=" %%D in ('ffprobe -v error -select_streams v:0 -show_entries stream^=duration -of default^=nw^=1:nk^=1 "!MP4_PATH!" 2^>nul') do if not defined RENDER_DURATION set "RENDER_DURATION=%%D"
 
-                REM Map video/audio from input, stream 3 GPMF from source
-                REM Do NOT write location via ffmpeg to avoid conflicting loci atom
-                ffmpeg -y -v error -i "!TEMP_FILE!" -i "!SRC360_PATH!" -map 0 -map 1:3 -c copy -tag:d:1 gpmd "!TEMP_GPMF!" >nul 2>&1
+            :: Locate gpmd dynamically. Different GoPro modes can place it at
+            :: different global stream indexes.
+            for /f "tokens=1,2 delims=," %%A in ('ffprobe -v error -select_streams d -show_entries stream^=index^,codec_tag_string -of csv^=p^=0 "!SRC360_PATH!" 2^>nul') do (
+                if /I "%%B"=="gpmd" if not defined GPMF_STREAM set "GPMF_STREAM=%%A"
+            )
+
+            if defined GPMF_STREAM (
+                set "USED_GPMF=1"
+                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Injecting GPMF stream !GPMF_STREAM!..."
+
+                if defined RENDER_DURATION (
+                    ffmpeg -y -v error -i "!TEMP_FILE!" -i "!SRC360_PATH!" -map 0 -map 1:!GPMF_STREAM! -map_metadata 0 -c copy -t !RENDER_DURATION! "!TEMP_GPMF!" >nul 2>&1
+                ) else (
+                    ffmpeg -y -v error -i "!TEMP_FILE!" -i "!SRC360_PATH!" -map 0 -map 1:!GPMF_STREAM! -map_metadata 0 -c copy -shortest "!TEMP_GPMF!" >nul 2>&1
+                )
 
                 if exist "!TEMP_GPMF!" (
                     move /y "!TEMP_GPMF!" "!TEMP_FILE!" >nul 2>&1
                 ) else (
-                    <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - WARNING: GPMF injection failed"
+                    set "PIPELINE_OK=0"
+                    set /a ERRORS+=1
                     echo.
+                    echo   ERROR: GPMF injection failed.
                 )
+            ) else (
+                set /a NO_GPMF+=1
+                echo.
+                echo   WARNING: No gpmd telemetry stream found in !SRC360_PATH!
             )
+        )
 
-            REM Step 3: Inject Metadata - Dates only - via exiftool
-            <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Injecting date metadata..."
+        if "!PIPELINE_OK!"=="1" (
             exiftool -overwrite_original -TagsFromFile "!SRC360_PATH!" "-CreateDate" "-ModifyDate" "-TrackCreateDate" "-TrackModifyDate" "-MediaCreateDate" "-MediaModifyDate" "!TEMP_FILE!" >nul 2>&1
 
-            REM Step 4: Write GPS to metadata tags for all platforms
             if defined GPS_DATA (
-                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Writing GPS to metadata tags..."
-                REM Keys:GPSCoordinates = Apple mdta com.apple.quicktime.location.ISO6709 - Google Photos, Apple
-                REM UserData:GPSCoordinates = ©xyz atom in udta - phone galleries, Android MediaStore
-                REM XMP-exif GPS tags = Windows, web, general metadata readers
                 exiftool -overwrite_original -n "-Keys:GPSCoordinates=!GPS_ISO6709!" "-UserData:GPSCoordinates=!GPS_ISO6709!" -XMP-exif:GPSLatitude="!LAT!" -XMP-exif:GPSLongitude="!LON!" -XMP-exif:GPSAltitude="!ALT!" -XMP-exif:GPSAltitudeRef=0 "!TEMP_FILE!" >nul 2>&1
-                REM Remove the loci atom that exiftool creates as a side-effect of UserData:GPSCoordinates
-                REM loci has lower precision and conflicts with the accurate GPS in ©xyz and Keys
                 exiftool -overwrite_original "-UserData:LocationInformation=" "!TEMP_FILE!" >nul 2>&1
             )
 
-            REM Step 5: Extract ISO and shutter speed range from GoPro telemetry
-            <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Extracting exposure data..."
             set "EXPOSURE_DATA="
-            for /f "tokens=*" %%E in ('powershell -ExecutionPolicy Bypass -File "%~dp0extract_exposure_range.ps1" "!SRC360_PATH!" 2^>nul') do set "EXPOSURE_DATA=%%E"
+            for /f "tokens=*" %%E in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0extract_exposure_range.ps1" "!SRC360_PATH!" 2^>nul') do set "EXPOSURE_DATA=%%E"
 
-            REM Parse ISO and Shutter from pipe-separated output
             set "ISO_RANGE="
             set "SHUTTER_RANGE="
             for /f "tokens=1,2 delims=|" %%A in ("!EXPOSURE_DATA!") do (
@@ -164,8 +178,6 @@ for /f "delims=" %%F in ('dir /b /s "%PREMIERE_DIR%\*.mp4" 2^>nul') do (
                 set "SHUTTER_RANGE=%%B"
             )
 
-            REM Step 6: Set Make, Model, and exposure info
-            <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Setting camera info..."
             if defined ISO_RANGE (
                 set "EXPOSURE_INFO=ISO !ISO_RANGE!, Shutter !SHUTTER_RANGE!"
                 exiftool -overwrite_original -Make="GoPro" -Model="GoPro MAX2" "-UserComment=!EXPOSURE_INFO!" "-Description=!EXPOSURE_INFO!" "!TEMP_FILE!" >nul 2>&1
@@ -173,27 +185,52 @@ for /f "delims=" %%F in ('dir /b /s "%PREMIERE_DIR%\*.mp4" 2^>nul') do (
                 exiftool -overwrite_original -Make="GoPro" -Model="GoPro MAX2" "!TEMP_FILE!" >nul 2>&1
             )
 
-            REM Move to output folder
-            <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - Moving to output..."
+            :: Verify that metadata rewriting did not alter the actual video.
+            set "VERIFY_RESULT="
+            for /f "tokens=*" %%V in ('powershell -NoProfile -ExecutionPolicy Bypass -File "!VERIFY_SCRIPT!" -Reference "!MP4_PATH!" -Candidate "!TEMP_FILE!" 2^>^&1') do set "VERIFY_RESULT=%%V"
+            echo(!VERIFY_RESULT! | findstr /B /C:"OK:" >nul
+            if errorlevel 1 (
+                set "PIPELINE_OK=0"
+                set /a ERRORS+=1
+                echo.
+                echo   !VERIFY_RESULT!
+                echo   Original export preserved: !MP4_PATH!
+            )
+
+            if "!PIPELINE_OK!"=="1" if "!USED_GPMF!"=="1" (
+                set "FINAL_GPMF="
+                for /f "tokens=*" %%G in ('ffprobe -v error -select_streams d -show_entries stream^=codec_tag_string -of csv^=p^=0 "!TEMP_FILE!" 2^>nul ^| findstr /I "gpmd"') do set "FINAL_GPMF=1"
+                if not defined FINAL_GPMF (
+                    set "PIPELINE_OK=0"
+                    set /a ERRORS+=1
+                    echo.
+                    echo   ERROR: final file lost the gpmd telemetry stream.
+                    echo   Original export preserved: !MP4_PATH!
+                )
+            )
+        )
+
+        if "!PIPELINE_OK!"=="1" (
             move /y "!TEMP_FILE!" "!OUTPUT_DIR!\!MP4_FILE!" >nul 2>&1
             if errorlevel 1 (
                 set /a ERRORS+=1
-                <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - ERROR: Move failed"
                 echo.
+                echo   ERROR: Could not move !MP4_FILE! to output folder.
             ) else (
                 set /a SUCCESS+=1
                 <nul set /p "=!ESC![2K!ESC![G[!PROCESSED!/!TOTAL!] !MP4_FILE! - OK"
                 echo.
-
-                REM Delete original from Premiere exports folder
-                del "!MP4_PATH!" >nul 2>&1
+                del /f /q "!MP4_PATH!" >nul 2>&1
             )
+        ) else (
+            if exist "!TEMP_FILE!" del /f /q "!TEMP_FILE!" >nul 2>&1
         )
+
+        if exist "!TEMP_GPMF!" del /f /q "!TEMP_GPMF!" >nul 2>&1
     )
 )
 
 :summary
-echo.
 echo.
 echo ============================================================================
 echo   SUMMARY
@@ -203,9 +240,12 @@ echo   Total MP4s:          !TOTAL!
 echo   Successfully tagged: !SUCCESS!
 echo   Errors:              !ERRORS!
 echo   Missing .360:        !MISSING!
+echo   No GPMF stream:      !NO_GPMF!
 echo.
 echo   Output folder: %OUTPUT_DIR%
 echo.
 echo ============================================================================
+echo.
 
 pause
+endlocal
