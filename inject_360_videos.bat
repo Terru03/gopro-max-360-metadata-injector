@@ -10,6 +10,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 :: - Uses Google's spatialmedia tool only when 360 metadata is actually missing
 :: - Verifies the primary video before deleting the original render
 :: - Keeps the console open when launched by double-click so errors stay visible
+:: - Runs child commands from the system drive to avoid mapped-drive CMD warnings
 :: ============================================================================
 
 call "%~dp0config.bat"
@@ -22,6 +23,7 @@ set "SPATIALMEDIA=%~dp0spatialmedia"
 set "VERIFY_SCRIPT=%~dp0verify_video_integrity.ps1"
 set "GPS_SCRIPT=%~dp0extract_first_locked_gps.ps1"
 set "EXPOSURE_SCRIPT=%~dp0extract_exposure_range.ps1"
+set "WORKDIR_PUSHED=0"
 
 if not "%~1"=="" set "RENDER_DIR=%~1"
 if not "%~2"=="" set "SRC360_DIR=%~2"
@@ -114,6 +116,14 @@ if not exist "%OUTPUT_DIR%" (
     goto :fatal
 )
 
+:: Child commands launched by FOR /F use cmd.exe. On some Windows setups a
+:: mapped-drive current directory causes cmd.exe to print:
+::   The system cannot find the drive specified.
+:: All project paths above are absolute, so run child commands from C:\ (or the
+:: active system drive) and restore the caller's directory before exiting.
+pushd "%SystemDrive%\" >nul 2>&1
+if not errorlevel 1 set "WORKDIR_PUSHED=1"
+
 set /a TOTAL=0
 for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do set /a TOTAL+=1
 
@@ -150,6 +160,7 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
     set "LAT="
     set "LON="
     set "ALT="
+    set "RENDER_DURATION="
 
     set "TEMP_FILE=!TEMP!\!MP4_NAME!_working.mp4"
     set "TEMP_GPMF=!TEMP!\!MP4_NAME!_gpmf.mp4"
@@ -171,6 +182,12 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
             set "PIPELINE_OK=0"
             set /a ERRORS+=1
             echo   ERROR: Could not copy render to temporary working file.
+        )
+
+        :: Extract render duration. If available, use it to cap the injected
+        :: file without allowing a shorter telemetry track to truncate video.
+        if "!PIPELINE_OK!"=="1" (
+            for /f "delims=" %%D in ('ffprobe -v error -select_streams v:0 -show_entries stream^=duration -of default^=nw^=1:nk^=1 "!MP4_PATH!" 2^>nul') do if not defined RENDER_DURATION set "RENDER_DURATION=%%D"
         )
 
         :: Extract the first valid GPS lock up front. This is optional metadata;
@@ -204,9 +221,11 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
                 set "USED_GPMF=1"
                 echo   Injecting GPMF telemetry from stream !GPMF_STREAM!...
 
-                :: -shortest prevents a longer source telemetry track from
-                :: extending the rendered MP4 duration.
-                ffmpeg -y -v error -i "!TEMP_FILE!" -i "!SRC360_PATH!" -map 0 -map 1:!GPMF_STREAM! -map_metadata 0 -c copy -shortest "!TEMP_GPMF!"
+                if defined RENDER_DURATION (
+                    ffmpeg -y -v error -i "!TEMP_FILE!" -i "!SRC360_PATH!" -map 0 -map 1:!GPMF_STREAM! -map_metadata 0 -c copy -t !RENDER_DURATION! "!TEMP_GPMF!" >nul 2>&1
+                ) else (
+                    ffmpeg -y -v error -i "!TEMP_FILE!" -i "!SRC360_PATH!" -map 0 -map 1:!GPMF_STREAM! -map_metadata 0 -c copy -shortest "!TEMP_GPMF!" >nul 2>&1
+                )
 
                 if errorlevel 1 (
                     set "PIPELINE_OK=0"
@@ -225,11 +244,15 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
             )
         )
 
-        :: Check whether the GoPro Player render already contains Spherical
-        :: Video V2 equirectangular metadata. If yes, preserve it exactly.
+        :: Test the actual spherical side-data using the same verifier used by
+        :: the final safety gate. This avoids false negatives from narrow
+        :: ffprobe -show_entries expressions on different FFmpeg builds.
         if "!PIPELINE_OK!"=="1" (
             set "HAS_SPHERICAL="
-            for /f "tokens=*" %%S in ('ffprobe -v error -select_streams v:0 -show_entries stream_side_data^=projection -of default^=nw^=1:nk^=1 "!TEMP_FILE!" 2^>nul ^| findstr /I /C:"equirectangular"') do set "HAS_SPHERICAL=1"
+            set "SPH_RESULT="
+            for /f "tokens=*" %%S in ('powershell -NoProfile -ExecutionPolicy Bypass -File "!VERIFY_SCRIPT!" -Reference "!TEMP_FILE!" -Candidate "!TEMP_FILE!" -RequireSpherical 2^>nul') do set "SPH_RESULT=%%S"
+            echo(!SPH_RESULT! | findstr /B /C:"OK:" >nul
+            if not errorlevel 1 set "HAS_SPHERICAL=1"
 
             if defined HAS_SPHERICAL (
                 echo   Existing equirectangular 360 metadata found. Preserving it.
@@ -243,7 +266,7 @@ for /f "delims=" %%F in ('dir /b /s "%RENDER_DIR%\*.mp4" 2^>nul') do (
                     set /a ERRORS+=1
                     echo   ERROR: spatialmedia fallback is missing: !SPATIALMEDIA!
                 ) else (
-                    python "!SPATIALMEDIA!" -i "!TEMP_FILE!" "!TEMP_OUT!"
+                    python "!SPATIALMEDIA!" -i "!TEMP_FILE!" "!TEMP_OUT!" >nul 2>&1
                     if errorlevel 1 (
                         set "PIPELINE_OK=0"
                         set /a ERRORS+=1
@@ -357,6 +380,8 @@ echo.
 echo ============================================================================
 echo.
 
+if "!WORKDIR_PUSHED!"=="1" popd >nul 2>&1
+
 if /I not "%GOPRO_NO_PAUSE%"=="1" pause
 
 set "FINAL_EXIT=0"
@@ -367,6 +392,7 @@ endlocal & exit /b %FINAL_EXIT%
 echo.
 echo The injector cannot continue. Fix the error above and run it again.
 echo.
+if "!WORKDIR_PUSHED!"=="1" popd >nul 2>&1
 if /I not "%GOPRO_NO_PAUSE%"=="1" pause
 endlocal
 exit /b 1
