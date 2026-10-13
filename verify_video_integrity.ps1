@@ -40,7 +40,7 @@ function Get-VideoInfo {
         [System.Globalization.NumberStyles]::Float,
         [System.Globalization.CultureInfo]::InvariantCulture,
         [ref]$duration
-    )) {
+    ) -or [double]::IsNaN($duration) -or [double]::IsInfinity($duration)) {
         throw "Could not read video duration from: $Path"
     }
 

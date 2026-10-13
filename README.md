@@ -212,3 +212,20 @@ After processing, the scripts automatically:
 ## License
 
 MIT License - See [LICENSE](LICENSE) for details.
+
+## Offline helper regression tests
+
+From the repository root on Windows:
+
+```powershell
+python -B -m unittest discover -s tests -v
+```
+
+Tests run the real PowerShell helpers against disposable files, with synthetic ExifTool and ffprobe output. They cover destination collisions, literal filenames, locked files, video-property mismatches and GPS parsing. No user media, external tools, recycling or live watch folders are used. Windows PowerShell is selected by default; set `POWERSHELL_EXE` to test another runtime, for example:
+
+```powershell
+$env:POWERSHELL_EXE = (Get-Command pwsh).Source
+python -B -m unittest discover -s tests -v
+```
+
+The watch-folder mover refuses to overwrite an existing destination. Its exclusive-access check detects a currently locked file; it cannot prove that a producer will never reopen an unlocked file. Integrity tests validate the helper's response to tool output, not actual video decoding or player compatibility.

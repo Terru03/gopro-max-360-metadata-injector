@@ -8,8 +8,8 @@ param(
 )
 
 # Create directories if they don't exist
-if (!(Test-Path -Path $SourceDir)) { New-Item -ItemType Directory -Force -Path $SourceDir | Out-Null }
-if (!(Test-Path -Path $DestDir)) { New-Item -ItemType Directory -Force -Path $DestDir | Out-Null }
+if (!(Test-Path -LiteralPath $SourceDir)) { New-Item -ItemType Directory -Force -Path $SourceDir | Out-Null }
+if (!(Test-Path -LiteralPath $DestDir)) { New-Item -ItemType Directory -Force -Path $DestDir | Out-Null }
 
 Write-Host "Monitoring: $SourceDir"
 Write-Host "Target:     $DestDir"
@@ -17,7 +17,7 @@ Write-Host "Press Ctrl+C to stop."
 Write-Host ""
 
 while ($true) {
-    $files = Get-ChildItem -Path $SourceDir -File | Where-Object { $_.Extension -ne ".jpg" }
+    $files = Get-ChildItem -LiteralPath $SourceDir -File | Where-Object { $_.Extension -ne ".jpg" }
 
     foreach ($file in $files) {
         $sourcePath = $file.FullName
@@ -29,13 +29,15 @@ while ($true) {
             $stream.Close()
             $stream.Dispose()
             
-            # If we get here, the file is NOT locked (writing is done)
+            # The file was unlocked at the check; producers must finish before
+            # releasing their handle (an unlocked pause cannot be detected).
             Write-Host "[MOVE] Moving $($file.Name)..." -ForegroundColor Green
-            Move-Item -Path $sourcePath -Destination $destPath -Force
+            # File.Move treats names literally and refuses an existing target,
+            # including a target created after our exclusive-access check.
+            [System.IO.File]::Move($sourcePath, $destPath)
         }
         catch {
-            # File is locked, skip it
-            Write-Host "[BUSY] $($file.Name) is still being written..." -ForegroundColor Yellow
+            Write-Host "[SKIP] $($file.Name): $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
 
