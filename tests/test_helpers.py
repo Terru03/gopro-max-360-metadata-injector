@@ -34,7 +34,7 @@ class HelperTests(unittest.TestCase):
         wrapper = self.root / "test-wrapper.ps1"
         wrapper.write_text(text, encoding="utf-8-sig")
         return subprocess.run([POWERSHELL, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(wrapper)],
-                              capture_output=True, text=True, timeout=20)
+                              capture_output=True, text=True, timeout=20, cwd=self.root)
 
     def move_once(self, before=""):
         # Stop the existing loop at its first sleep; filesystem operations stay real.
@@ -76,6 +76,26 @@ class HelperTests(unittest.TestCase):
         self.move_once()
         self.assertTrue((self.source / "photo.JPG").exists())
         self.assertEqual(list(self.dest.iterdir()), [])
+
+    def test_move_resolves_relative_dirs_from_powershell_location(self):
+        project = self.root / "project[1]"
+        source = project / "source"
+        destination = project / "dest"
+        source.mkdir(parents=True)
+        destination.mkdir()
+        (source / "clip.mp4").write_bytes(b"relative path video")
+        # .NET process cwd and PowerShell location deliberately disagree.
+        # root/dest exists so the regression would silently move to the wrong folder.
+        result = self.run_ps("[Environment]::CurrentDirectory = " + quote(self.root) +
+                             "\nSet-Location -LiteralPath " + quote(project) +
+                             "\nfunction Start-Sleep { throw 'TEST_END' }\ntry { & " +
+                             quote(ROOT / "safe_move.ps1") + " -SourceDir source -DestDir dest" +
+                             " } catch { if ($_.Exception.Message -ne 'TEST_END') { throw } }\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(list(self.dest.iterdir()), [], result.stdout)
+        self.assertTrue((destination / "clip.mp4").exists(), result.stdout + result.stderr)
+        self.assertEqual((destination / "clip.mp4").read_bytes(), b"relative path video")
+        self.assertFalse((source / "clip.mp4").exists())
 
     def probe(self, reference=None, candidate=None, spherical=False, fail=False):
         default = {"codec_name": "hevc", "width": 4096, "height": 2048, "r_frame_rate": "30000/1001",

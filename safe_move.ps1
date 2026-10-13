@@ -7,6 +7,11 @@ param(
     [string]$DestDir = "P:\GoPro MAX 2\5 - Premiere Watch Folder"
 )
 
+# .NET file operations use the process cwd, which can differ from Set-Location.
+# Resolve both paths through PowerShell before passing them to .NET.
+$SourceDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SourceDir)
+$DestDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($DestDir)
+
 # Create directories if they don't exist
 if (!(Test-Path -LiteralPath $SourceDir)) { New-Item -ItemType Directory -Force -Path $SourceDir | Out-Null }
 if (!(Test-Path -LiteralPath $DestDir)) { New-Item -ItemType Directory -Force -Path $DestDir | Out-Null }

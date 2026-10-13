@@ -175,7 +175,7 @@ When you edit a 360° video in Premiere Pro and export it as a standard flat vid
 - **Does NOT inject:** Spherical/360° metadata (since the export is a standard flat video)
 
 ### `extract_first_locked_gps.ps1`
-Helper script that scans GoPro GPMF telemetry for the first GPS sample with a 3D lock (`GPSMeasureMode=3`) and non-zero coordinates. Outputs two lines: decimal lat/lon/alt (for XMP tags) and ISO 6709 format with max 5 decimal digits (for `Keys`/`UserData` GPS tags). This handles GoPro's Quick Capture mode where the camera starts recording before GPS has acquired a fix.
+Helper script that scans GoPro GPMF telemetry for the first GPS sample with a 3D lock (`GPSMeasureMode=3`), finite latitude within -90 to 90 degrees, finite longitude within -180 to 180 degrees, and finite altitude (defaulting to zero if absent). Zero latitude or longitude is valid, including the equator and prime meridian. Unknown or unlocked samples and malformed or out-of-range coordinates are skipped. Outputs two lines: decimal lat/lon/alt (for XMP tags) and ISO 6709 format with max 5 decimal digits (for `Keys`/`UserData` GPS tags). This handles GoPro's Quick Capture mode where the camera starts recording before GPS has acquired a fix.
 
 ### `extract_exposure_range.ps1`
 Helper script that parses GoPro's per-frame telemetry data to extract min/max ISO and shutter speed values.
