@@ -175,7 +175,7 @@ When you edit a 360° video in Premiere Pro and export it as a standard flat vid
 - **Does NOT inject:** Spherical/360° metadata (since the export is a standard flat video)
 
 ### `extract_first_locked_gps.ps1`
-Helper script that scans GoPro GPMF telemetry for the first GPS sample with a 3D lock (`GPSMeasureMode=3`) and non-zero coordinates. Outputs two lines: decimal lat/lon/alt (for XMP tags) and ISO 6709 format with max 5 decimal digits (for `Keys`/`UserData` GPS tags). This handles GoPro's Quick Capture mode where the camera starts recording before GPS has acquired a fix.
+Helper script that scans GoPro GPMF telemetry for the first GPS sample with a 3D lock (`GPSMeasureMode=3`), finite latitude within -90 to 90 degrees, finite longitude within -180 to 180 degrees, and finite altitude (defaulting to zero if absent). Zero latitude or longitude is valid, including the equator and prime meridian. Unknown or unlocked samples and malformed or out-of-range coordinates are skipped. Outputs two lines: decimal lat/lon/alt (for XMP tags) and ISO 6709 format with max 5 decimal digits (for `Keys`/`UserData` GPS tags). This handles GoPro's Quick Capture mode where the camera starts recording before GPS has acquired a fix.
 
 ### `extract_exposure_range.ps1`
 Helper script that parses GoPro's per-frame telemetry data to extract min/max ISO and shutter speed values.
@@ -212,3 +212,20 @@ After processing, the scripts automatically:
 ## License
 
 MIT License - See [LICENSE](LICENSE) for details.
+
+## Offline helper regression tests
+
+From the repository root on Windows:
+
+```powershell
+python -B -m unittest discover -s tests -v
+```
+
+Tests run the real PowerShell helpers against disposable files, with synthetic ExifTool and ffprobe output. They cover destination collisions, literal filenames, locked files, video-property mismatches and GPS parsing. No user media, external tools, recycling or live watch folders are used. Windows PowerShell is selected by default; set `POWERSHELL_EXE` to test another runtime, for example:
+
+```powershell
+$env:POWERSHELL_EXE = (Get-Command pwsh).Source
+python -B -m unittest discover -s tests -v
+```
+
+The watch-folder mover refuses to overwrite an existing destination. Its exclusive-access check detects a currently locked file; it cannot prove that a producer will never reopen an unlocked file. Integrity tests validate the helper's response to tool output, not actual video decoding or player compatibility.
